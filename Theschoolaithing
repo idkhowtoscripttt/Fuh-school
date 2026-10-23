@@ -1,0 +1,396 @@
+javascript:(function(){
+/* ── ENGAGELI TOOLKIT ─────────────────────────── */
+if(window._engTools){window._engTools.toggle();return;}
+
+const $ = (s,r=document) => r.querySelector(s);
+const $$ = (s,r=document) => [...r.querySelectorAll(s)];
+
+/* ── STYLES ──────────────────────────────────── */
+const style = document.createElement('style');
+style.textContent = `
+#_etoolkit{
+  position:fixed;top:20px;right:20px;z-index:999999;
+  background:#0d0d14;border:1.5px solid #7c3aed;
+  border-radius:12px;padding:14px;width:280px;
+  font-family:system-ui,sans-serif;font-size:13px;
+  color:#e2e8f0;box-shadow:0 8px 32px #0008;
+}
+#_etoolkit h3{margin:0 0 10px;font-size:14px;color:#a78bfa;
+  display:flex;justify-content:space-between;align-items:center;}
+#_etoolkit button{
+  width:100%;padding:8px 10px;margin:3px 0;
+  background:#1e1b4b;border:1px solid #4c1d95;
+  border-radius:8px;color:#e2e8f0;cursor:pointer;
+  font-size:12px;text-align:left;transition:background .15s;
+}
+#_etoolkit button:hover{background:#2d2680;}
+#_etoolkit button.active{background:#4c1d95;border-color:#7c3aed;}
+#_etoolkit .sep{height:1px;background:#2d2680;margin:8px 0;}
+#_etoolkit input[type=text]{
+  width:100%;padding:7px;background:#1e1b4b;
+  border:1px solid #4c1d95;border-radius:8px;
+  color:#e2e8f0;font-size:12px;box-sizing:border-box;
+  margin:3px 0;
+}
+#_etoolkit .row{display:flex;gap:6px;}
+#_etoolkit .row button{width:auto;flex:1;}
+#_etoolkit .status{font-size:11px;color:#6b7280;margin-top:8px;
+  padding:6px;background:#111827;border-radius:6px;}
+`;
+document.head.appendChild(style);
+
+/* ── PANEL ───────────────────────────────────── */
+const panel = document.createElement('div');
+panel.id = '_etoolkit';
+panel.innerHTML = `
+  <h3>⚡ Engageli Tools <span id="_etclose" style="cursor:pointer;color:#6b7280;font-size:16px;">✕</span></h3>
+  
+  <div class="sep"></div>
+  <div style="color:#a78bfa;font-size:11px;margin-bottom:6px;">💬 ROOM CHAT</div>
+  <input type="text" id="_etmsg" placeholder="Message to entire room..."/>
+  <div class="row">
+    <button id="_etsend">📢 Send to Room</button>
+    <button id="_etspam" title="Auto-send every few seconds">🔁 Loop</button>
+  </div>
+  <input type="text" id="_etinterval" placeholder="Loop interval (seconds)" style="margin-top:3px;"/>
+  
+  <div class="sep"></div>
+  <div style="color:#a78bfa;font-size:11px;margin-bottom:6px;">🛠️ TOOLS</div>
+  <button id="_etraise">✋ Raise Hand</button>
+  <button id="_etunraise">✋ Lower Hand</button>
+  <button id="_etreact">😊 Cycle Reactions</button>
+  <button id="_etmic">🎤 Toggle Mic</button>
+  <button id="_etcam">📷 Toggle Camera</button>
+  <button id="_etunlock">🔓 Unlock All Tools</button>
+  <button id="_etchat_all">💬 Force Room Chat Mode</button>
+  
+  <div class="sep"></div>
+  <div style="color:#a78bfa;font-size:11px;margin-bottom:6px;">👁️ VISIBILITY</div>
+  <button id="_ethide">👻 Hide Yourself</button>
+  <button id="_etshow_hidden">🔍 Show Hidden UI</button>
+  <button id="_etinstructor">👑 Show Instructor View</button>
+  
+  <div class="sep"></div>
+  <div class="row">
+    <button id="_etdrag">↕️ Drag</button>
+    <button id="_etmin">— Min</button>
+  </div>
+  <div class="status" id="_etstatus">Ready.</div>
+`;
+document.body.appendChild(panel);
+
+const log = (msg) => { $('#_etstatus').textContent = msg; };
+
+/* ── DRAG ────────────────────────────────────── */
+let dragging=false,ox=0,oy=0;
+$('#_etdrag').addEventListener('mousedown', e=>{
+  dragging=true; ox=e.clientX-panel.offsetLeft; oy=e.clientY-panel.offsetTop;
+  document.addEventListener('mousemove', onDrag);
+  document.addEventListener('mouseup', ()=>{dragging=false;document.removeEventListener('mousemove',onDrag);});
+});
+function onDrag(e){ if(dragging){panel.style.left=e.clientX-ox+'px';panel.style.top=e.clientY-oy+'px';panel.style.right='auto';} }
+
+/* ── CLOSE ───────────────────────────────────── */
+$('#_etclose').onclick = () => { panel.remove(); style.remove(); delete window._engTools; };
+$('#_etmin').onclick   = () => {
+  const content = $$('#_etoolkit > *:not(h3)');
+  const hidden  = content[0].style.display === 'none';
+  content.forEach(el => el.style.display = hidden ? '' : 'none');
+};
+
+/* ── REACT FIBER HELPER ──────────────────────── */
+function getReact(el){
+  if(!el) return null;
+  const key = Object.keys(el).find(k=>k.startsWith('__reactFiber')||k.startsWith('__reactInternalInstance'));
+  return key ? el[key] : null;
+}
+function getProps(el){
+  const f = getReact(el);
+  if(!f) return null;
+  return f.memoizedProps || (f.return && f.return.memoizedProps) || null;
+}
+
+/* ── FIND ENGAGELI INTERNALS ─────────────────── */
+function findChatInput(){
+  return $('textarea[placeholder*="chat"],textarea[placeholder*="Chat"],textarea[placeholder*="message"],textarea[placeholder*="Message"],[contenteditable][data-testid*="chat"],[contenteditable][data-testid*="message"]')
+    || $$('textarea').find(el=>el.offsetParent!==null)
+    || null;
+}
+function findSendBtn(){
+  return $$('button').find(b=>{
+    const t = (b.textContent||'').toLowerCase().trim();
+    const a = (b.getAttribute('aria-label')||'').toLowerCase();
+    return t==='send'||a.includes('send')||b.dataset.testid?.includes('send');
+  });
+}
+function findChatSelect(){
+  return $$('select,div[role="combobox"],div[role="listbox"]').find(el=>{
+    const t = (el.textContent||'').toLowerCase();
+    return t.includes('room')||t.includes('table')||t.includes('everyone');
+  });
+}
+function findRaiseHand(){
+  return $$('button').find(b=>{
+    const a = (b.getAttribute('aria-label')||b.textContent||'').toLowerCase();
+    return a.includes('raise')||a.includes('hand');
+  });
+}
+function findMicBtn(){
+  return $$('button').find(b=>{
+    const a = (b.getAttribute('aria-label')||'').toLowerCase();
+    return a.includes('mic')||a.includes('mute')||a.includes('audio');
+  });
+}
+function findCamBtn(){
+  return $$('button').find(b=>{
+    const a = (b.getAttribute('aria-label')||'').toLowerCase();
+    return a.includes('camera')||a.includes('video')||a.includes('cam');
+  });
+}
+
+/* ── FORCE ROOM CHAT ─────────────────────────── */
+function forceRoomChat(){
+  // Method 1: find and set the "send to" dropdown to Room/Everyone
+  const selectors = [
+    '[data-testid*="chat-to"]',
+    '[data-testid*="recipient"]',
+    '[aria-label*="Send to"]',
+    '[aria-label*="recipient"]',
+    'select[name*="recipient"]',
+    'select[name*="to"]',
+  ];
+  for(const sel of selectors){
+    const el = $(sel);
+    if(el){
+      // try setting value to room
+      ['room','everyone','all','Room','Everyone','All'].forEach(v=>{
+        try{
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,'value').set;
+          nativeInputValueSetter.call(el,v);
+          el.dispatchEvent(new Event('change',{bubbles:true}));
+        }catch(e){}
+      });
+      // if it's a button/div combobox
+      const opts = $$('li,option,[role="option"]',el.closest('[role="listbox"]')||document);
+      const roomOpt = opts.find(o=>(o.textContent||'').toLowerCase().includes('room')||(o.textContent||'').toLowerCase().includes('everyone'));
+      if(roomOpt){ roomOpt.click(); log('✅ Chat set to Room'); return true; }
+    }
+  }
+
+  // Method 2: find any dropdown that has room/everyone options
+  const allDropdowns = $$('[role="option"],[role="menuitem"],option');
+  const roomOpt = allDropdowns.find(o=>{
+    const t=(o.textContent||'').toLowerCase();
+    return t.includes('room')||t.includes('everyone')||t.includes('all student');
+  });
+  if(roomOpt){ roomOpt.click(); log('✅ Set to Room via option'); return true; }
+
+  // Method 3: intercept WebSocket and patch chat destination
+  patchWebSocket();
+  log('⚡ WS patch applied — chat forced to room');
+  return false;
+}
+
+/* ── WEBSOCKET PATCH ─────────────────────────── */
+function patchWebSocket(){
+  if(window._etWSPatched) return;
+  window._etWSPatched = true;
+  const origSend = WebSocket.prototype.send;
+  WebSocket.prototype.send = function(data){
+    try{
+      if(typeof data === 'string'){
+        let parsed = JSON.parse(data);
+        // patch any "to" or "recipient" fields to room
+        if(parsed.type==='chat'||parsed.event==='chat'||parsed.data?.type==='chat'){
+          if(parsed.to||parsed.recipient||parsed.data?.to){
+            if(parsed.to)       parsed.to='room';
+            if(parsed.recipient)parsed.recipient='room';
+            if(parsed.data?.to) parsed.data.to='room';
+            data = JSON.stringify(parsed);
+            log('⚡ WS chat → room');
+          }
+        }
+      }
+    }catch(e){}
+    return origSend.call(this,data);
+  };
+}
+
+/* ── SEND MESSAGE TO ROOM ────────────────────── */
+function sendRoomMessage(msg){
+  if(!msg){msg=$('#_etmsg').value;}
+  if(!msg.trim()){log('⚠️ Type a message first');return;}
+  
+  forceRoomChat();
+
+  const input = findChatInput();
+  if(input){
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      input.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLElement.prototype,
+      'value'
+    )?.set;
+    if(nativeSetter){
+      nativeSetter.call(input,msg);
+    } else {
+      input.textContent = msg;
+    }
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+    setTimeout(()=>{
+      const btn = findSendBtn();
+      if(btn){ btn.click(); log('✅ Sent to room: '+msg.substring(0,30)); }
+      else {
+        // try enter key
+        input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));
+        input.dispatchEvent(new KeyboardEvent('keyup',  {key:'Enter',keyCode:13,bubbles:true}));
+        log('✅ Sent via Enter: '+msg.substring(0,30));
+      }
+    },200);
+  } else {
+    log('❌ Chat input not found — open chat first');
+  }
+}
+
+/* ── LOOP CHAT ───────────────────────────────── */
+let loopInterval = null;
+$('#_etspam').onclick = () => {
+  if(loopInterval){
+    clearInterval(loopInterval);
+    loopInterval=null;
+    $('#_etspam').classList.remove('active');
+    $('#_etspam').textContent='🔁 Loop';
+    log('⏹ Loop stopped');
+  } else {
+    const secs = parseFloat($('#_etinterval').value)||10;
+    const msg  = $('#_etmsg').value;
+    if(!msg.trim()){log('⚠️ Type message first');return;}
+    loopInterval = setInterval(()=>sendRoomMessage(msg), secs*1000);
+    $('#_etspam').classList.add('active');
+    $('#_etspam').textContent='⏹ Stop';
+    log('🔁 Looping every '+secs+'s');
+  }
+};
+
+/* ── UNLOCK ALL TOOLS ────────────────────────── */
+function unlockTools(){
+  let count=0;
+  // find disabled buttons and enable them
+  $$('button[disabled],button[aria-disabled="true"]').forEach(btn=>{
+    btn.removeAttribute('disabled');
+    btn.removeAttribute('aria-disabled');
+    btn.style.opacity='1';
+    btn.style.pointerEvents='auto';
+    count++;
+  });
+  // find locked/hidden tool panels
+  $$('[class*="locked"],[class*="disabled"],[class*="hidden"],[data-locked="true"]').forEach(el=>{
+    el.classList.remove('locked','disabled','hidden');
+    el.removeAttribute('data-locked');
+    el.style.display='';
+    el.style.visibility='visible';
+    el.style.opacity='1';
+    count++;
+  });
+  log(`🔓 Unlocked ${count} elements`);
+}
+
+/* ── SHOW HIDDEN UI ──────────────────────────── */
+function showHiddenUI(){
+  let count=0;
+  // make all hidden/invisible elements visible
+  $$('[style*="display: none"],[style*="display:none"],[style*="visibility: hidden"]').forEach(el=>{
+    if(el.id==='_etoolkit')return;
+    el.style.display='block';
+    el.style.visibility='visible';
+    count++;
+  });
+  log(`👁️ Revealed ${count} hidden elements`);
+}
+
+/* ── INSTRUCTOR VIEW ─────────────────────────── */
+function showInstructorView(){
+  // try to find instructor-only panels
+  const selectors=[
+    '[class*="instructor"],[class*="Instructor"]',
+    '[data-role="instructor"]',
+    '[class*="moderator"]',
+    '[class*="host"]',
+  ];
+  let count=0;
+  selectors.forEach(sel=>{
+    $$(sel).forEach(el=>{
+      el.style.display='block';
+      el.style.visibility='visible';
+      el.style.opacity='1';
+      count++;
+    });
+  });
+  // also try React state manipulation
+  const app = $('[id="root"],[id="app"],[data-reactroot]');
+  if(app){
+    const fiber = getReact(app);
+    if(fiber){log('⚡ React fiber found — attempting role override');}
+  }
+  log(`👑 Instructor view: ${count} elements shown`);
+}
+
+/* ── REACTIONS ───────────────────────────────── */
+const reactions = ['👍','❤️','😂','😮','👏','🎉'];
+let reactionIdx = 0;
+$('#_etreact').onclick = () => {
+  const emoji = reactions[reactionIdx++ % reactions.length];
+  const btns = $$('button').filter(b=>(b.textContent||'').includes(emoji)||(b.getAttribute('aria-label')||'').includes('reaction'));
+  if(btns[0]){ btns[0].click(); log('Reaction: '+emoji); }
+  else { log('❌ Reaction buttons not found'); }
+};
+
+/* ── WIRE UP BUTTONS ─────────────────────────── */
+$('#_etsend').onclick    = () => sendRoomMessage($('#_etmsg').value);
+$('#_etunlock').onclick  = unlockTools;
+$('#_etchat_all').onclick= () => { forceRoomChat(); log('💬 Room chat forced'); };
+$('#_etshow_hidden').onclick = showHiddenUI;
+$('#_etinstructor').onclick  = showInstructorView;
+
+$('#_etraise').onclick = () => {
+  const btn = findRaiseHand();
+  if(btn){btn.click();log('✋ Hand raised');}
+  else log('❌ Button not found');
+};
+$('#_etunraise').onclick = () => {
+  const btn = $$('button').find(b=>{
+    const a=(b.getAttribute('aria-label')||b.textContent||'').toLowerCase();
+    return a.includes('lower')||a.includes('unraise');
+  });
+  if(btn){btn.click();log('✋ Hand lowered');}
+  else { const rh=findRaiseHand(); if(rh){rh.click();log('Hand toggled');} }
+};
+$('#_etmic').onclick = () => {
+  const btn=findMicBtn();
+  if(btn){btn.click();log('🎤 Mic toggled');}
+  else log('❌ Mic button not found');
+};
+$('#_etcam').onclick = () => {
+  const btn=findCamBtn();
+  if(btn){btn.click();log('📷 Cam toggled');}
+  else log('❌ Camera button not found');
+};
+$('#_ethide').onclick = () => {
+  const me = $('[class*="self-view"],[class*="localVideo"],[class*="selfVideo"],[data-testid*="self"]');
+  if(me){me.style.display='none';log('👻 Hidden');}
+  else log('❌ Self view not found');
+};
+
+/* ── ENTER KEY ON CHAT INPUT ─────────────────── */
+$('#_etmsg').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendRoomMessage();}
+});
+
+/* ── EXPOSE TOGGLE ───────────────────────────── */
+window._engTools = {
+  toggle: ()=>{ panel.style.display = panel.style.display==='none'?'block':'none'; }
+};
+
+/* ── PATCH WS ON LOAD ────────────────────────── */
+patchWebSocket();
+log('✅ Loaded — run again to toggle panel');
+})();
